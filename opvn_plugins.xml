@@ -1,0 +1,7 @@
+<library path="lib/libopvn_plugins">
+    <class name="opvn_plugins/OpvnProcessor"
+           type="opvn_plugins::OpvnProcessor"
+           base_class_type="nodelet::Nodelet">
+        <description>This is a openvino processor plugin.</description>
+    </class>
+</library>

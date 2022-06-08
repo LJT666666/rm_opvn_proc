@@ -1,0 +1,6 @@
+rm_vision:
+  opvn_proc:
+    xml_path: '/model/model.xml'
+    cof_threshold: 0.1
+    nms_area_threshold: 0.5
+    class_num: 8

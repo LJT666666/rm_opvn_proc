@@ -1,0 +1,12 @@
+<launch>
+<arg name="manager_name" default="nodelet_manager" />
+<node pkg="nodelet" type="nodelet" name="$(arg manager_name)" args="manager" output="screen" >
+    <param name="num_worker_threads" value="8" />
+</node>
+
+
+
+<node pkg="nodelet" type="nodelet" name="opvn_processor"
+    args="load opvn_plugins/OpvnProcessor $(arg manager_name)" >
+</node>
+</launch>
