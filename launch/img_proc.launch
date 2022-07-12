@@ -5,7 +5,6 @@
 </node>
 
 
-
 <node pkg="nodelet" type="nodelet" name="opvn_processor"
     args="load opvn_plugins/OpvnProcessor $(arg manager_name)" >
 </node>

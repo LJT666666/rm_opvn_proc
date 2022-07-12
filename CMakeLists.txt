@@ -16,7 +16,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   std_msgs
   pluginlib
-nodelet
+  nodelet
   rm_vision
         image_transport
         cv_bridge

@@ -7,43 +7,35 @@
 #include <ros/package.h>
 #include <ros/callback_queue.h>
 
-
 using namespace InferenceEngine;
 using namespace cv;
-//int number = 0;
+
 PLUGINLIB_EXPORT_CLASS(opvn_plugins::OpvnProcessor, nodelet::Nodelet)
 
 namespace opvn_plugins {
-
-
     void OpvnProcessor::onInit() {
-
         ros::NodeHandle& nh = getPrivateNodeHandle();
         static ros::CallbackQueue my_queue;
         nh.setCallbackQueue(&my_queue);
         initialize(nh);
-        my_thread_ = std::thread([]()
-                                 {
-                                     ros::SingleThreadedSpinner spinner;
-                                     spinner.spin(&my_queue);
-                                 });
-
+        my_thread_ = std::thread([](){
+             ros::SingleThreadedSpinner spinner;
+             spinner.spin(&my_queue);
+        });
     }
 
     void OpvnProcessor::initialize(ros::NodeHandle &nh) {
         nh_ = ros::NodeHandle(nh, "opvn_proc");
-
-        nh_.param<double>("cof_threshold", cof_threshold_, 0.1);
-        nh_.param<std::string>("xml_path", xml_path_, "/model/polygon_yolox_nano_100_1000.xml");
-        nh_.param<std::string>("bin_path", bin_path_, "/model/polygon_yolox_nano_100_1000.bin");
+        nh_.param<double>("cof_threshold", cof_threshold_, 0.5);
+        nh_.param<std::string>("xml_path", xml_path_, "/model/polygon_yolox_nano_100_4000.xml");
+        nh_.param<std::string>("bin_path", bin_path_, "/model/polygon_yolox_nano_100_4000.bin");
         nh_.param<double>("nms_area_threshold", nms_area_threshold_, 0.3);
         nh_.param<int>("class_num", class_num_, 36);
         nh_.param<int>("input_row", input_row_, 416);
         nh_.param<int>("input_col", input_col_, 416);
-
-//        xml_path_ = ros::package::getPath("rm_opvn_proc") + xml_path_;
-//        bin_path_ = ros::package::getPath("rm_opvn_proc") + bin_path_;
-//        ROS_INFO("model_path:%s", (xml_path_+bin_path_).c_str());
+        xml_path_ = ros::package::getPath("rm_opvn_proc") + xml_path_;
+        bin_path_ = ros::package::getPath("rm_opvn_proc") + bin_path_;
+        ROS_INFO("model_path:%s", (xml_path_+bin_path_).c_str());
         Core ie;
         CNNNetwork network = ie.ReadNetwork(xml_path_, bin_path_);
 
@@ -53,7 +45,7 @@ namespace opvn_plugins {
             throw std::logic_error("Sample supports topologies with 1 input only");
         // -----------------------------------------------------------------------------------------------------
 
-        // --------------------------- Step 3. Configure input & output
+        // --------------------------- Step 1. Configure input & output
         // ---------------------------------------------
         // --------------------------- Prepare input blobs
         // -----------------------------------------------------
@@ -74,31 +66,28 @@ namespace opvn_plugins {
         output_info_->setPrecision(Precision::FP32);
         // -----------------------------------------------------------------------------------------------------
 
-        // --------------------------- Step 4. Loading a model to the device
+        // --------------------------- Step 2. Loading a model to the device
         // ------------------------------------------
         executable_network_ = ie.LoadNetwork(network, "CPU");
-        // --------------------------- Step 5. Create an infer request
+        // --------------------------- Step 3. Create an infer request
         // -------------------------------------------------
         infer_request_ = executable_network_.CreateInferRequest();
         // -----------------------------------------------------------------------------------------------------
+
         it_ = make_shared<image_transport::ImageTransport>(nh_);
-
         debug_pub_ = it_->advertise("debug_image", 1);
-
-        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
-
+//        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
+        bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         target_pub_ = nh.advertise<decltype(target_array_)>("/processor/result_msg", 1);
     }
 
     void OpvnProcessor::imageProcess(cv_bridge::CvImagePtr &cv_image) {
-
         if (cv_image->image.empty()) {
             ROS_ERROR("invalid image input");
             return;
         }
         cv_image->image.copyTo(image_raw_);
 //        image_raw_ = Mat::zeros(cv_image->image.rows, cv_image->image.cols, CV_8UC3);
-
     }
 
     void OpvnProcessor::findArmor() {
@@ -115,23 +104,18 @@ namespace opvn_plugins {
 //                }
 //            }
 //        }
-//        string imwrite_path = "/home/ljt666666/polygon_armor_data/blue_2m/" + to_string(number) + ".jpg";
-//        number += 1;
-//        imwrite(imwrite_path, image_raw_);
-//        ROS_INFO("%d", number);
-        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/9.jpg");
+
+//        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
         square_image_ = staticResize(image_raw_);
-        ROS_INFO("findarmor!");
+        ROS_INFO("seeking armor!");
+        Blob::Ptr img_blob = infer_request_.GetBlob(input_name_);     // just wrap Mat data by Blob::Ptr
+        blobFromImage(square_image_, img_blob);
 
-        Blob::Ptr imgBlob = infer_request_.GetBlob(input_name_);     // just wrap Mat data by Blob::Ptr
-        blobFromImage(square_image_, imgBlob);
         //infer
-
         infer_request_.Infer();
 
         // get infer result
         parseModel();
-
     }
 
     void OpvnProcessor::parseModel() {
@@ -143,54 +127,42 @@ namespace opvn_plugins {
         }
         // locked memory holder should be alive all time while access to its buffer
         // happens
-        auto moutputHolder = moutput->rmap();
-        const float *net_pred = moutputHolder.as<const PrecisionTrait<Precision::FP32>::value_type *>();
+        auto moutput_holder = moutput->rmap();
+        const float *net_pred = moutput_holder.as<const PrecisionTrait<Precision::FP32>::value_type *>();
 
-        int img_w = image_raw_.cols;
-        int img_h = image_raw_.rows;
-        float scale = std::min(input_col_ / (image_raw_.cols), input_row_ / (image_raw_.rows));
-
-        decodeOutputs(net_pred, scale, img_w, img_h);
+        decodeOutputs(net_pred);
 
 //        auto start = chrono::high_resolution_clock::now();
 //        draw(image_raw_, objects);
     }
 
-    void OpvnProcessor::decodeOutputs(const float *net_pred, float scale, int img_w, int img_h) {
+    void OpvnProcessor::decodeOutputs(const float *net_pred) {
         std::vector<Target> proposals;
         std::vector<int> strides = {8, 16, 32};
         std::vector<GridAndStride> grid_strides;
 
         generateGridsAndStride(input_col_, input_row_, strides, grid_strides);
-
         generateYoloxProposals(grid_strides, net_pred, cof_threshold_, proposals);
 //        ROS_INFO("%d", proposals.size());
 
-        qsortDescentInplace(proposals, 0, proposals.size() - 1);
+        qsortDescentInplace(proposals, proposals.size() - 1);
 
         std::vector<int> picked;
 //        ROS_INFO("%d", proposalproposalss.size());
 
         nmsSortedBoxes(proposals, picked, nms_area_threshold_);
 
-
         objects_ = proposals;
         int count = proposals.size();
 
-
         for (int i = 0; i < count; i++) {
             rm_msgs::TargetDetection one_target;
-            ROS_INFO("%d",6);
-
             one_target.confidence = proposals[i].prob;
             one_target.id = proposals[i].label;
             int32_t temp[8];
-            for (int g = 0; g < 8; g++){
 
-            }
             for (int k = 0; k < 4; k++)
             {
-
                 temp[k * 2] = static_cast<int32_t>(roundf(proposals[i].points[k]));
                 temp[k * 2 + 1] = static_cast<int32_t>(roundf(proposals[i].points[k + 1]));
             }
@@ -203,10 +175,8 @@ namespace opvn_plugins {
         }
     }
 
-
     Mat OpvnProcessor::staticResize(cv::Mat &img) {
         r_ = std::min(input_col_ / (img.cols * 1.0), input_row_ / (img.rows * 1.0));
-//        ROS_INFO("%f", r_);
         int unpad_w = r_ * img.cols;
         int unpad_h = r_ * img.rows;
         cv::Mat re(unpad_h, unpad_w, CV_8UC3);
@@ -223,14 +193,11 @@ namespace opvn_plugins {
         int img_h = img.rows;
         int img_w = img.cols;
         InferenceEngine::MemoryBlob::Ptr mblob = InferenceEngine::as<InferenceEngine::MemoryBlob>(blob);
-        if (!mblob) {
-            THROW_IE_EXCEPTION << "We expect blob to be inherited from MemoryBlob in matU8ToBlob, "
-                               << "but by fact we were not able to cast inputBlob to MemoryBlob";
-        }
-        // locked memory holder should be alive all time while access to its buffer happens
-        auto mblobHolder = mblob->wmap();
 
-        float *blob_data = mblobHolder.as<float *>();
+        // locked memory holder should be alive all time while access to its buffer happens
+        auto mblob_holder = mblob->wmap();
+
+        float *blob_data = mblob_holder.as<float *>();
 
         for (size_t c = 0; c < channels; c++) {
             for (size_t h = 0; h < img_h; h++) {
@@ -241,7 +208,6 @@ namespace opvn_plugins {
             }
         }
     }
-
 
     void OpvnProcessor::generateGridsAndStride(const int target_w, const int target_h, std::vector<int> &strides,
                                           std::vector<GridAndStride> &grid_strides) {
@@ -256,12 +222,12 @@ namespace opvn_plugins {
         }
     }
 
-    void OpvnProcessor::qsortDescentInplace(std::vector<Target> &faceobjects, int left, int right) {
+    void OpvnProcessor::qsortDescentInplace(std::vector<Target> &faceobjects, int right) {
         if (faceobjects.empty())
             return;
-        int i = left;
+        int i = 0;
         int j = right;
-        float p = faceobjects[(left + right) / 2].prob;
+        float p = faceobjects[(0 + right) / 2].prob;
 
         while (i <= j) {
             while (faceobjects[i].prob > p)
@@ -329,33 +295,23 @@ namespace opvn_plugins {
                     obj.points.push_back(y3);
                     obj.points.push_back(x4);
                     obj.points.push_back(y4);
-                    /*obj.rect.x = x0;
-                    obj.rect.y = y0;
-                    obj.rect.width = w;
-                    obj.rect.height = h;*/
-                    obj.label = class_idx;
+                    obj.label = class_id;
                     obj.prob = box_prob;
-
                     proposals.push_back(obj);
-
                 }
-
             } // class loop
         } // point anchor loop
-
     }
 
     void OpvnProcessor::nmsSortedBoxes(std::vector<Target> &faceobjects, std::vector<int> &picked, double nms_threshold)  {
         picked.clear();
-        PolygonIou H;
-//        PolygonIou H;
+        PolygonIou polygon_iou;
         vector<Target> results;
-        while (faceobjects.size()> 0)
+        while (!faceobjects.empty())
         {
             results.push_back(faceobjects[0]);
             int index = 1;
             while (index < faceobjects.size()) {
-
                 Target a = faceobjects[0];
                 Target b = faceobjects[index];
 //                bbox_t box1;
@@ -379,20 +335,16 @@ namespace opvn_plugins {
                     qq.push_back(q[i]);
                 }
 
-                float iou_value = H.iou_poly(pp, qq);
+                float iou_value = polygon_iou.iouPoly(pp, qq);
                 if (iou_value == 1)
                     iou_value = 0;
 //                cout << "iou_value=" << iou_value << endl;
                 if (iou_value > nms_threshold) {
-
                     faceobjects.erase(faceobjects.begin() + index);
-
                 }
                 else {
                     index++;
                 }
-
-
             }
             faceobjects.erase(faceobjects.begin());
         }
@@ -412,7 +364,7 @@ namespace opvn_plugins {
     }
     int PolygonIou::lineCross(Points a,Points b,Points c,Points d,Points&p){
         double s1,s2;
-        s1=cross(a,b,c);
+        s1=cross(c,a,b);
         s2=cross(a,b,d);
         if(sig(s1)==0&&sig(s2)==0) return 2;
         if(sig(s2-s1)==0) return 0;
@@ -423,7 +375,7 @@ namespace opvn_plugins {
 //多边形切割
 //用直线ab切割多边形p，切割后的在向量(a,b)的左侧，并原地保存切割结果
 //如果退化为一个点，也会返回去,此时n为1
-//void polygon_cut(Point*p,int&n,Point a,Point b){
+//void polygonCut(Point*p,int&n,Point a,Point b){
 //    static Point pp[maxn];
 //    int m=0;p[n]=p[0];
 //    for(int i=0;i<n;i++){
@@ -437,7 +389,7 @@ namespace opvn_plugins {
 //            p[n++]=pp[i];
 //    while(n>1&&p[n-1]==p[0])n--;
 //}
-    void PolygonIou::polygon_cut(Points*p,int&n,Points a,Points b, Points* pp){
+    void PolygonIou::polygonCut(Points*p,int&n,Points a,Points b, Points* pp){
 //    static Points pp[maxn];
         int m=0;p[n]=p[0];
         for(int i=0;i<n;i++){
@@ -463,9 +415,9 @@ namespace opvn_plugins {
         Points p[10]={o,a,b};
         int n=3;
         Points pp[maxn];
-        polygon_cut(p,n,o,c, pp);
-        polygon_cut(p,n,c,d, pp);
-        polygon_cut(p,n,d,o, pp);
+        polygonCut(p,n,o,c, pp);
+        polygonCut(p,n,c,d, pp);
+        polygonCut(p,n,d,o, pp);
         double res=fabs(area(p,n));
         if(s1*s2==-1) res=-res;return res;
     }
@@ -485,14 +437,13 @@ namespace opvn_plugins {
     }
 
 
-    double PolygonIou::iou_poly(vector<double> p, vector<double> q) {
+    double PolygonIou::iouPoly(vector<double> p, vector<double> q) {
         Points ps1[maxn],ps2[maxn];
         int n1 = 4;
         int n2 = 4;
         for (int i = 0; i < 4; i++) {
             ps1[i].x = p[i * 2];
             ps1[i].y = p[i * 2 + 1];
-
             ps2[i].x = q[i * 2];
             ps2[i].y = q[i * 2 + 1];
         }
