@@ -17,6 +17,8 @@
 #include <pluginlib/class_list_macros.h>
 #include <pluginlib/class_loader.h>
 #include <thread>
+#include <dynamic_reconfigure/server.h>
+#include <rm_opvn_proc/OpvnConfig.h>
 #include <rm_msgs/TargetDetectionArray.h>
 #include <rm_msgs/TargetDetection.h>
 
@@ -29,40 +31,40 @@ const double EPS=1E-8;
 
 namespace opvn_plugins {
 
-    struct Target {
-        std::vector<float> points;
-        int label;
-        float prob;
-    };
+struct Target {
+    std::vector<float> points;
+    int label;
+    float prob;
+};
 
-    struct GridAndStride {
-        int grid0;
-        int grid1;
-        int stride;
-    };
+struct GridAndStride {
+    int grid0;
+    int grid1;
+    int stride;
+};
 
 
 class OpvnProcessor : public rm_vision::ProcessorInterface , public nodelet::Nodelet{
-    public:
-        void onInit() override;
+public:
+    void onInit() override;
 
-        void initialize(ros::NodeHandle &nh) override;
+    void initialize(ros::NodeHandle &nh) override;
 
-        void imageProcess(cv_bridge::CvImagePtr &cv_image) override;
+    void imageProcess(cv_bridge::CvImagePtr &cv_image) override;
 
-        void findArmor() override;
+    void findArmor() override;
 
-        void parseModel();
+    void parseModel();
 
-        void paramReconfig() override;
+    void paramReconfig() override;
 
-        void draw() override;
+    void draw() override;
 
-        Object getObj() override;
+    Object getObj() override;
 
-        void putObj() override;
+    void putObj() override;
 
-    private:
+private:
     rm_msgs::TargetDetectionArray target_array_;
     ros::Publisher target_pub_;
     ros::NodeHandle nh_;
@@ -71,6 +73,10 @@ class OpvnProcessor : public rm_vision::ProcessorInterface , public nodelet::Nod
     image_transport::CameraSubscriber cam_sub_;
     image_transport::Subscriber bag_sub_;
     std::thread my_thread_;
+
+    dynamic_reconfigure::Server<rm_opvn_proc::OpvnConfig>* opvn_cfg_srv_;  // server of dynamic config about armor
+    dynamic_reconfigure::Server<rm_opvn_proc::OpvnConfig>::CallbackType opvn_cfg_cb_;
+    void opvnconfigCB(rm_opvn_proc::OpvnConfig& config, uint32_t level);
 
 //    void callback(const sensor_msgs::ImageConstPtr& img, const sensor_msgs::CameraInfoConstPtr& info)
     void callback(const sensor_msgs::ImageConstPtr& img)
@@ -97,51 +103,42 @@ class OpvnProcessor : public rm_vision::ProcessorInterface , public nodelet::Nod
             memcpy(buffer+2, &target_array_.detections[0].pose.orientation.y, sizeof(int32_t) * 2);
             memcpy(buffer+4, &target_array_.detections[0].pose.orientation.z, sizeof(int32_t) * 2);
             memcpy(buffer+6, &target_array_.detections[0].pose.orientation.w, sizeof(int32_t) * 2);
-            static const char *class_names[] = {
-                    "red_2", "red_3", "red_4", "red_5"
-            };
-            for(auto & object : objects_){
-                line(image_raw_, Point(object.points[0]/r_, object.points[1]/r_), Point(object.points[2]/r_, object.points[3]/r_), Scalar(0, 0, 255), 5, 4);
-                line(image_raw_, Point(object.points[2]/r_, object.points[3]/r_), Point(object.points[4]/r_, object.points[5]/r_), Scalar(0, 0, 255), 5, 4);
-                line(image_raw_, Point(object.points[4]/r_, object.points[5]/r_), Point(object.points[6]/r_, object.points[7]/r_), Scalar(0, 0, 255), 5, 4);
-                line(image_raw_, Point(object.points[6]/r_, object.points[7]/r_), Point(object.points[0]/r_, object.points[1]/r_), Scalar(0, 0, 255), 5, 4);
-                cv::putText(image_raw_, to_string(object.label), cv::Point(object.points[0]/r_, object.points[3]/r_-40),cv::FONT_HERSHEY_SIMPLEX, 1, Scalar (0, 255, 0), 3);
-            }
             target_pub_.publish(target_array_);
         }
 //        debug_pub_.publish(cv_bridge::CvImage(info->header, "bgr8", image_raw_).toImageMsg());
         debug_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), "bgr8", image_raw_).toImageMsg());
     }
 
-        int class_num_;  // label num
-        std::string xml_path_;  // .xml file path
-        std::string bin_path_;  // .bin file path
-        std::string input_name_;  // input name defined by model
-        std::string output_name_;  // input name defined by model
-        DataPtr output_info_;  // information of model output
-        ExecutableNetwork executable_network_;  // executable network
-        InferRequest infer_request_;
-        double cof_threshold_;  // confidence threshold of object class
-        double nms_area_threshold_;  // non-maximum suppression
-        int input_row_, input_col_;  // input shape of model
-        Mat square_image_;  //  input image of model
-        Mat image_raw_;  //predict image
-        std::vector<Target> objects_;
-        float r_; // image ratio
+    int class_num_;  // label num
+    std::string xml_path_;  // .xml file path
+    std::string bin_path_;  // .bin file path
+    std::string input_name_;  // input name defined by model
+    std::string output_name_;  // input name defined by model
+    DataPtr output_info_;  // information of model output
+    ExecutableNetwork executable_network_;  // executable network
+    InferRequest infer_request_;
+    double cof_threshold_;  // confidence threshold of object class
+    double nms_area_threshold_;  // non-maximum suppression
+    bool rotate_ ;
+    int input_row_, input_col_;  // input shape of model
+    Mat square_image_;  //  input image of model
+    Mat image_raw_;  //predict image
+    std::vector<Target> objects_;
+    float r_; // image ratio
 
-        Mat staticResize(cv::Mat &img);
+    Mat staticResize(cv::Mat &img);
 
-        void blobFromImage(cv::Mat &img, Blob::Ptr &blob);
+    void blobFromImage(cv::Mat &img, Blob::Ptr &blob);
 
-        void decodeOutputs(const float *net_pred);
+    void decodeOutputs(const float *net_pred);
 
-        void generateGridsAndStride(const int target_w, const int target_h, std::vector<int> &strides, std::vector<GridAndStride> &grid_strides);
+    void generateGridsAndStride(const int target_w, const int target_h, std::vector<int> &strides, std::vector<GridAndStride> &grid_strides);
 
-        void qsortDescentInplace(std::vector<Target> &faceobjects, int right);
+    void qsortDescentInplace(std::vector<Target> &faceobjects, int right);
 
-        void generateYoloxProposals(std::vector<GridAndStride> grid_strides, const float *net_pred, double cof_threshold_,  std::vector<Target> &proposals);
+    void generateYoloxProposals(std::vector<GridAndStride> grid_strides, const float *net_pred, double cof_threshold_,  std::vector<Target> &proposals);
 
-        void nmsSortedBoxes(std::vector<Target> &faceobjects, std::vector<int> &picked, double nms_threshold);
+    void nmsSortedBoxes(std::vector<Target> &faceobjects, std::vector<int> &picked, double nms_threshold);
 
     };
 

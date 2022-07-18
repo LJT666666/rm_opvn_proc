@@ -1,6 +1,8 @@
-rm_vision:
-  opvn_proc:
-    xml_path: '/model/model.xml'
-    cof_threshold: 0.1
-    nms_area_threshold: 0.5
-    class_num: 8
+xml_path: "/model/polygon_yolox_nano_100_4000.xml"
+bin_path: "/model/polygon_yolox_nano_100_4000.bin"
+rotate: false
+input_row: 416
+input_col: 416
+cof_threshold: 0.5
+nms_area_threshold: 0.5
+class_num: 36

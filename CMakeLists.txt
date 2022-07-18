@@ -8,16 +8,16 @@ project(rm_opvn_proc)
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
 find_package(catkin REQUIRED COMPONENTS
-  dynamic_reconfigure
-  geometry_msgs
-  message_generation
-  rm_common
-  rm_msgs
-  roscpp
-  std_msgs
-  pluginlib
-  nodelet
-  rm_vision
+        dynamic_reconfigure
+        geometry_msgs
+        message_generation
+        rm_common
+        rm_msgs
+        roscpp
+        std_msgs
+        pluginlib
+        nodelet
+        rm_vision
         image_transport
         cv_bridge
 )
@@ -31,6 +31,9 @@ find_package(ngraph REQUIRED)
 set(ngraph_LIBRARIES "/opt/intel/openvino_2021/deployment_tools/ngraph/lib/libngraph.so")
 set(ngraph_INCLUDE_DIRS "/opt/intel/openvino_2021/deployment_tools/ngraph/include/")
 
+generate_dynamic_reconfigure_options(
+        cfg/Opvn.cfg
+)
 
 catkin_package(
         INCLUDE_DIRS
@@ -51,6 +54,7 @@ catkin_package(
         cv_bridge
 )
 
+
 include_directories(
         include
         include/rm_opvn_proc
@@ -60,6 +64,14 @@ include_directories(
 )
 
 add_library(opvn_plugins src/opvn_plugins.cpp)
-target_link_libraries(opvn_plugins ${OpenCV_LIBS} ${catkin_LIBRARIES}
-        ${InferenceEngine_LIBRARIES} ${ngraph_LIBRARIES}
+
+add_dependencies(opvn_plugins
+        ${PROJECT_NAME}_gencfg
+        )
+
+target_link_libraries(opvn_plugins
+        ${OpenCV_LIBS}
+        ${catkin_LIBRARIES}
+        ${InferenceEngine_LIBRARIES}
+        ${ngraph_LIBRARIES}
         )

@@ -26,59 +26,58 @@ namespace opvn_plugins {
 
     void OpvnProcessor::initialize(ros::NodeHandle &nh) {
         nh_ = ros::NodeHandle(nh, "opvn_proc");
-        nh_.param<double>("cof_threshold", cof_threshold_, 0.5);
-        nh_.param<std::string>("xml_path", xml_path_, "/model/polygon_yolox_nano_100_4000.xml");
-        nh_.param<std::string>("bin_path", bin_path_, "/model/polygon_yolox_nano_100_4000.bin");
-        nh_.param<double>("nms_area_threshold", nms_area_threshold_, 0.3);
-        nh_.param<int>("class_num", class_num_, 36);
-        nh_.param<int>("input_row", input_row_, 416);
-        nh_.param<int>("input_col", input_col_, 416);
+        if(!nh.getParam("rotate", rotate_))
+            ROS_WARN("No rotate specified");
+        if(!nh.getParam("xml_path", xml_path_))
+            ROS_WARN("No xml_path specified");
+        if(!nh.getParam("bin_path", bin_path_))
+            ROS_WARN("No bin_path specified");
+        if(!nh.getParam("cof_threshold", cof_threshold_))
+            ROS_WARN("No cof_threshold specified");
+        if(!nh.getParam("nms_area_threshold", nms_area_threshold_))
+            ROS_WARN("No xml_path specified");
+        if(!nh.getParam("class_num", class_num_))
+            ROS_WARN("No class_num_ specified");
+        if(!nh.getParam("input_row", input_row_))
+            ROS_WARN("No input_row specified");
+        if(!nh.getParam("input_col", input_col_))
+            ROS_WARN("No input_col specified");
+
         xml_path_ = ros::package::getPath("rm_opvn_proc") + xml_path_;
         bin_path_ = ros::package::getPath("rm_opvn_proc") + bin_path_;
         ROS_INFO("model_path:%s", (xml_path_+bin_path_).c_str());
+
+        //Initialize the inference parameters
         Core ie;
         CNNNetwork network = ie.ReadNetwork(xml_path_, bin_path_);
-
         if (network.getOutputsInfo().size() != 1)
             throw std::logic_error("Sample supports topologies with 1 output only");
         if (network.getInputsInfo().size() != 1)
             throw std::logic_error("Sample supports topologies with 1 input only");
-        // -----------------------------------------------------------------------------------------------------
-
-        // --------------------------- Step 1. Configure input & output
-        // ---------------------------------------------
-        // --------------------------- Prepare input blobs
-        // -----------------------------------------------------
         InputInfo::Ptr input_info = network.getInputsInfo().begin()->second;
         input_name_ = network.getInputsInfo().begin()->first;
-        /* Mark input as resizable by setting of a resize algorithm.
-         * In this case we will be able to set an input blob of any shape to an
-         * infer request. Resize and layout conversions are executed automatically
-         * during inference */
-        //input_info->getPreProcess().setResizeAlgorithm(RESIZE_BILINEAR);
-        //input_info->setLayout(Layout::NHWC);
-        //input_info->setPrecision(Precision::FP32);
-        // --------------------------- Prepare output blobs
-        // ----------------------------------------------------
-
         output_info_ = network.getOutputsInfo().begin()->second;
         output_name_ = network.getOutputsInfo().begin()->first;
         output_info_->setPrecision(Precision::FP32);
-        // -----------------------------------------------------------------------------------------------------
-
-        // --------------------------- Step 2. Loading a model to the device
-        // ------------------------------------------
         executable_network_ = ie.LoadNetwork(network, "CPU");
-        // --------------------------- Step 3. Create an infer request
-        // -------------------------------------------------
         infer_request_ = executable_network_.CreateInferRequest();
-        // -----------------------------------------------------------------------------------------------------
+
+        opvn_cfg_srv_ = new dynamic_reconfigure::Server<rm_opvn_proc::OpvnConfig>(ros::NodeHandle(nh_, "opvn_condition"));
+        opvn_cfg_cb_ = boost::bind(&OpvnProcessor::opvnconfigCB, this, _1, _2);
+        opvn_cfg_srv_->setCallback(opvn_cfg_cb_);
 
         it_ = make_shared<image_transport::ImageTransport>(nh_);
         debug_pub_ = it_->advertise("debug_image", 1);
-//        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
+        //cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         target_pub_ = nh.advertise<decltype(target_array_)>("/processor/result_msg", 1);
+    }
+
+    void OpvnProcessor::opvnconfigCB(rm_opvn_proc::OpvnConfig& config, uint32_t level)
+    {
+        cof_threshold_ = config.cof_threshold;
+        nms_area_threshold_ = config.nms_area_threshold;
+        rotate_ = config.rotate;
     }
 
     void OpvnProcessor::imageProcess(cv_bridge::CvImagePtr &cv_image) {
@@ -87,25 +86,14 @@ namespace opvn_plugins {
             return;
         }
         cv_image->image.copyTo(image_raw_);
-//        image_raw_ = Mat::zeros(cv_image->image.rows, cv_image->image.cols, CV_8UC3);
     }
 
     void OpvnProcessor::findArmor() {
         InferRequest::Ptr infer = executable_network_.CreateInferRequestPtr();
-//        Blob::Ptr frame_blob = infer->GetBlob(input_name_);
-//        LockedMemory<void> blob_mapped = as<MemoryBlob>(frame_blob)->wmap();
-//        auto *blob_data = blob_mapped.as<float *>();
-//        //NCHW
-//        for (size_t row = 0; row < input_row_; row++) {
-//            for (size_t col = 0; col < input_col_; col++) {
-//                for (size_t ch = 0; ch < 3; ch++) {
-//                    blob_data[input_row_ * input_col_ + row * input_col_ + col] =
-//                            float(square_image_.at<Vec3b>(row, col)[ch]) / 255.0;
-//                }
-//            }
-//        }
 
-//        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
+        //image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
+        if(rotate_)
+            cv::rotate(image_raw_, image_raw_, cv::ROTATE_180);
         square_image_ = staticResize(image_raw_);
         ROS_INFO("seeking armor!");
         Blob::Ptr img_blob = infer_request_.GetBlob(input_name_);     // just wrap Mat data by Blob::Ptr
@@ -129,29 +117,20 @@ namespace opvn_plugins {
         // happens
         auto moutput_holder = moutput->rmap();
         const float *net_pred = moutput_holder.as<const PrecisionTrait<Precision::FP32>::value_type *>();
-
         decodeOutputs(net_pred);
-
-//        auto start = chrono::high_resolution_clock::now();
-//        draw(image_raw_, objects);
     }
 
     void OpvnProcessor::decodeOutputs(const float *net_pred) {
         std::vector<Target> proposals;
         std::vector<int> strides = {8, 16, 32};
         std::vector<GridAndStride> grid_strides;
+        std::vector<int> picked;
 
         generateGridsAndStride(input_col_, input_row_, strides, grid_strides);
         generateYoloxProposals(grid_strides, net_pred, cof_threshold_, proposals);
-//        ROS_INFO("%d", proposals.size());
-
+        //ROS_INFO("proposals size is : %d", proposals.size());
         qsortDescentInplace(proposals, proposals.size() - 1);
-
-        std::vector<int> picked;
-//        ROS_INFO("%d", proposalproposalss.size());
-
         nmsSortedBoxes(proposals, picked, nms_area_threshold_);
-
         objects_ = proposals;
         int count = proposals.size();
 
@@ -171,7 +150,17 @@ namespace opvn_plugins {
             memcpy(&one_target.pose.orientation.z, &temp[4], sizeof(int32_t) * 2);
             memcpy(&one_target.pose.orientation.w, &temp[6], sizeof(int32_t) * 2);
             target_array_.detections.emplace_back(one_target);
+        }
+    }
 
+    void OpvnProcessor::draw() {
+        //static const char *class_names[] = {"red_2", "red_3", "red_4", "red_5"};
+        for(auto & object : objects_){
+            line(image_raw_, Point(object.points[0]/r_, object.points[1]/r_), Point(object.points[2]/r_, object.points[3]/r_), Scalar(0, 255, 0), 2, 4);
+            line(image_raw_, Point(object.points[2]/r_, object.points[3]/r_), Point(object.points[4]/r_, object.points[5]/r_), Scalar(0, 255, 0), 2, 4);
+            line(image_raw_, Point(object.points[4]/r_, object.points[5]/r_), Point(object.points[6]/r_, object.points[7]/r_), Scalar(0, 255, 0), 2, 4);
+            line(image_raw_, Point(object.points[6]/r_, object.points[7]/r_), Point(object.points[0]/r_, object.points[1]/r_), Scalar(0, 255, 0), 2, 4);
+            cv::putText(image_raw_, to_string(object.label), cv::Point(object.points[0]/r_, object.points[3]/r_-40),cv::FONT_HERSHEY_SIMPLEX, 1, Scalar (0, 255, 0), 3);
         }
     }
 
@@ -196,7 +185,6 @@ namespace opvn_plugins {
 
         // locked memory holder should be alive all time while access to its buffer happens
         auto mblob_holder = mblob->wmap();
-
         float *blob_data = mblob_holder.as<float *>();
 
         for (size_t c = 0; c < channels; c++) {
@@ -239,7 +227,6 @@ namespace opvn_plugins {
             if (i <= j) {
                 // swap
                 std::swap(faceobjects[i], faceobjects[j]);
-
                 i++;
                 j--;
             }
@@ -282,7 +269,6 @@ namespace opvn_plugins {
             float box_objectness = net_pred[basic_pos + 8];
 
             for (int class_idx = 0; class_idx < class_num_; class_idx++) {
-                int class_id = net_pred[basic_pos + 8 + class_idx + 1];
                 float box_cls_score = net_pred[basic_pos + 9 + class_idx];
                 float box_prob = box_objectness * box_cls_score;
                 if (box_prob > cof_threshold_) {
@@ -295,7 +281,7 @@ namespace opvn_plugins {
                     obj.points.push_back(y3);
                     obj.points.push_back(x4);
                     obj.points.push_back(y4);
-                    obj.label = class_id;
+                    obj.label = class_idx;
                     obj.prob = box_prob;
                     proposals.push_back(obj);
                 }
@@ -314,18 +300,6 @@ namespace opvn_plugins {
             while (index < faceobjects.size()) {
                 Target a = faceobjects[0];
                 Target b = faceobjects[index];
-//                bbox_t box1;
-//                bbox_t box2;
-//                box1.pts[0].x = a.points[0], box1.pts[0].y = a.points[1];
-//                box1.pts[3].x = a.points[2], box1.pts[3].y = a.points[3];
-//                box1.pts[2].x = a.points[4], box1.pts[2].y = a.points[5];
-//                box1.pts[1].x = a.points[6], box1.pts[1].y = a.points[7];
-
-//                box2.pts[0].x = b.points[0], box2.pts[0].y = b.points[1];
-//                box2.pts[3].x = b.points[2], box2.pts[3].y = b.points[3];
-//                box2.pts[2].x = b.points[4], box2.pts[2].y = b.points[5];
-//                box2.pts[1].x = b.points[6], box2.pts[1].y = b.points[7];
-//                H.getBoxes(box1, box2);
                 double p[8] = {a.points[0], a.points[1], a.points[6], a.points[7], a.points[4], a.points[5], a.points[2], a.points[3]};
                 double q[8] = {b.points[0], b.points[1], b.points[6], b.points[7], b.points[4], b.points[5], b.points[2], b.points[3]};
                 vector<double> pp, qq;
@@ -338,7 +312,7 @@ namespace opvn_plugins {
                 float iou_value = polygon_iou.iouPoly(pp, qq);
                 if (iou_value == 1)
                     iou_value = 0;
-//                cout << "iou_value=" << iou_value << endl;
+                //cout << "iou_value=" << iou_value << endl;
                 if (iou_value > nms_threshold) {
                     faceobjects.erase(faceobjects.begin() + index);
                 }
@@ -351,9 +325,10 @@ namespace opvn_plugins {
         faceobjects = results;
     }
 
-    double PolygonIou::cross(Points o,Points a,Points b){  //叉积
+    double PolygonIou::cross(Points o,Points a,Points b){  //Dot multiply
         return(a.x-o.x)*(b.y-o.y)-(b.x-o.x)*(a.y-o.y);
     }
+
     double PolygonIou::area(Points* ps,int n){
         ps[n]=ps[0];
         double res=0;
@@ -362,6 +337,7 @@ namespace opvn_plugins {
         }
         return res/2.0;
     }
+
     int PolygonIou::lineCross(Points a,Points b,Points c,Points d,Points&p){
         double s1,s2;
         s1=cross(c,a,b);
@@ -372,25 +348,29 @@ namespace opvn_plugins {
         p.y=(c.y*s2-d.y*s1)/(s2-s1);
         return 1;
     }
-//多边形切割
-//用直线ab切割多边形p，切割后的在向量(a,b)的左侧，并原地保存切割结果
-//如果退化为一个点，也会返回去,此时n为1
-//void polygonCut(Point*p,int&n,Point a,Point b){
-//    static Point pp[maxn];
-//    int m=0;p[n]=p[0];
-//    for(int i=0;i<n;i++){
-//        if(sig(cross(a,b,p[i]))>0) pp[m++]=p[i];
-//        if(sig(cross(a,b,p[i]))!=sig(cross(a,b,p[i+1])))
-//            lineCross(a,b,p[i],p[i+1],pp[m++]);
-//    }
-//    n=0;
-//    for(int i=0;i<m;i++)
-//        if(!i||!(pp[i]==pp[i-1]))
-//            p[n++]=pp[i];
-//    while(n>1&&p[n-1]==p[0])n--;
-//}
+
+    /*
+    Polygon cutting
+    Cut the polygon p with a straight line ab, after cutting on the left side of the vector (a, b), and save the cut result in situ
+    If it degenerates to a point, it also returns, at which point n is 1
+     */
+    //void polygonCut(Point*p,int&n,Point a,Point b){
+    //    static Point pp[maxn];
+    //    int m=0;p[n]=p[0];
+    //    for(int i=0;i<n;i++){
+    //        if(sig(cross(a,b,p[i]))>0) pp[m++]=p[i];
+    //        if(sig(cross(a,b,p[i]))!=sig(cross(a,b,p[i+1])))
+    //            lineCross(a,b,p[i],p[i+1],pp[m++]);
+    //    }
+    //    n=0;
+    //    for(int i=0;i<m;i++)
+    //        if(!i||!(pp[i]==pp[i-1]))
+    //            p[n++]=pp[i];
+    //    while(n>1&&p[n-1]==p[0])n--;
+    //}
+
     void PolygonIou::polygonCut(Points*p,int&n,Points a,Points b, Points* pp){
-//    static Points pp[maxn];
+        //static Points pp[maxn];
         int m=0;p[n]=p[0];
         for(int i=0;i<n;i++){
             if(sig(cross(a,b,p[i]))>0) pp[m++]=p[i];
@@ -403,8 +383,8 @@ namespace opvn_plugins {
                 p[n++]=pp[i];
         while(n>1&&p[n-1]==p[0])n--;
     }
-//---------------华丽的分隔线-----------------//
-//返回三角形oab和三角形ocd的有向交面积,o是原点//
+
+    //Returns the directed intersection area of the triangle oab and the triangle oad, with o being the origin
     double PolygonIou::intersectArea(Points a,Points b,Points c,Points d){
         Points o(0,0);
         int s1=sig(cross(o,a,b));
@@ -421,7 +401,8 @@ namespace opvn_plugins {
         double res=fabs(area(p,n));
         if(s1*s2==-1) res=-res;return res;
     }
-//求两多边形的交面积
+
+    //Finds the intersection area of the two polygons
     double PolygonIou::intersectArea(Points*ps1,int n1,Points*ps2,int n2){
         if(area(ps1,n1)<0) reverse(ps1,ps1+n1);
         if(area(ps2,n2)<0) reverse(ps2,ps2+n2);
@@ -435,7 +416,6 @@ namespace opvn_plugins {
         }
         return res;//assumeresispositive!
     }
-
 
     double PolygonIou::iouPoly(vector<double> p, vector<double> q) {
         Points ps1[maxn],ps2[maxn];
@@ -451,21 +431,14 @@ namespace opvn_plugins {
         double union_area = fabs(area(ps1, n1)) + fabs(area(ps2, n2)) - inter_area;
         double iou = inter_area / union_area;
 
-//    cout << "inter_area:" << inter_area << endl;
-//    cout << "union_area:" << union_area << endl;
-//    cout << "iou:" << iou << endl;
+        //    cout << "inter_area:" << inter_area << endl;
+        //    cout << "union_area:" << union_area << endl;
+        //    cout << "iou:" << iou << endl;
 
         return iou;
     }
 
-
-
-
     void OpvnProcessor::paramReconfig() {
-
-    }
-
-    void OpvnProcessor::draw() {
 
     }
 
