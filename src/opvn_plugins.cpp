@@ -28,6 +28,8 @@ namespace opvn_plugins {
         nh_ = ros::NodeHandle(nh, "opvn_proc");
         if(!nh.getParam("rotate", rotate_))
             ROS_WARN("No rotate specified");
+        if(!nh.getParam("twelve_classes", twelve_classes_))
+            ROS_WARN("No twelve_classes specified");
         if(!nh.getParam("xml_path", xml_path_))
             ROS_WARN("No xml_path specified");
         if(!nh.getParam("bin_path", bin_path_))
@@ -68,8 +70,8 @@ namespace opvn_plugins {
 
         it_ = make_shared<image_transport::ImageTransport>(nh_);
         debug_pub_ = it_->advertise("debug_image", 1);
-        //cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
-        bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
+        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
+//        bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         target_pub_ = nh.advertise<decltype(target_array_)>("/processor/result_msg", 1);
     }
 
@@ -78,6 +80,8 @@ namespace opvn_plugins {
         cof_threshold_ = config.cof_threshold;
         nms_area_threshold_ = config.nms_area_threshold;
         rotate_ = config.rotate;
+        twelve_classes_ = config.twelve_classes;
+        target_type_ = config.target_color;
     }
 
     void OpvnProcessor::imageProcess(cv_bridge::CvImagePtr &cv_image) {
@@ -90,18 +94,14 @@ namespace opvn_plugins {
 
     void OpvnProcessor::findArmor() {
         InferRequest::Ptr infer = executable_network_.CreateInferRequestPtr();
-
-        //image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
+//        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
         if(rotate_)
             cv::rotate(image_raw_, image_raw_, cv::ROTATE_180);
         square_image_ = staticResize(image_raw_);
-        ROS_INFO("seeking armor!");
         Blob::Ptr img_blob = infer_request_.GetBlob(input_name_);     // just wrap Mat data by Blob::Ptr
         blobFromImage(square_image_, img_blob);
-
         //infer
         infer_request_.Infer();
-
         // get infer result
         parseModel();
     }
@@ -131,6 +131,7 @@ namespace opvn_plugins {
         //ROS_INFO("proposals size is : %d", proposals.size());
         qsortDescentInplace(proposals, proposals.size() - 1);
         nmsSortedBoxes(proposals, picked, nms_area_threshold_);
+
         objects_ = proposals;
         int count = proposals.size();
 
@@ -142,8 +143,8 @@ namespace opvn_plugins {
 
             for (int k = 0; k < 4; k++)
             {
-                temp[k * 2] = static_cast<int32_t>(roundf(proposals[i].points[k]));
-                temp[k * 2 + 1] = static_cast<int32_t>(roundf(proposals[i].points[k + 1]));
+                temp[k * 2] = static_cast<int32_t>(roundf(proposals[i].points[k * 2])/r_);
+                temp[k * 2 + 1] = static_cast<int32_t>(roundf(proposals[i].points[(k * 2)+1]/r_));
             }
             memcpy(&one_target.pose.orientation.x, &temp[0], sizeof(int32_t) * 2);
             memcpy(&one_target.pose.orientation.y, &temp[2], sizeof(int32_t) * 2);
@@ -244,18 +245,6 @@ namespace opvn_plugins {
 
             const int basic_pos = anchor_idx * (class_num_ + 9);
 
-            // yolox/models/yolo_head.py decode logic
-            //  outputs[..., :2] = (outputs[..., :2] + grids) * strides
-            //  outputs[..., 2:4] = torch.exp(outputs[..., 2:4]) * strides
-
-            //normal yolox
-            /*float x_center = (feat_ptr[basic_pos + 0] + grid0) * stride;
-            float y_center = (feat_ptr[basic_pos + 1] + grid1) * stride;
-            float w = exp(feat_ptr[basic_pos + 2]) * stride;
-            float h = exp(feat_ptr[basic_pos + 3]) * stride;
-            float x0 = x_center - w * 0.5f;
-            float y0 = y_center - h * 0.5f;*/
-
             //polygon_yolox
             float x1 = (net_pred[basic_pos + 0] + grid0) * stride;
             float y1 = (net_pred[basic_pos + 1] + grid1) * stride;
@@ -268,25 +257,59 @@ namespace opvn_plugins {
 
             float box_objectness = net_pred[basic_pos + 8];
 
-            for (int class_idx = 0; class_idx < class_num_; class_idx++) {
-                float box_cls_score = net_pred[basic_pos + 9 + class_idx];
-                float box_prob = box_objectness * box_cls_score;
-                if (box_prob > cof_threshold_) {
-                    Target obj;
-                    obj.points.push_back(x1);
-                    obj.points.push_back(y1);
-                    obj.points.push_back(x2);
-                    obj.points.push_back(y2);
-                    obj.points.push_back(x3);
-                    obj.points.push_back(y3);
-                    obj.points.push_back(x4);
-                    obj.points.push_back(y4);
-                    obj.label = class_idx;
-                    obj.prob = box_prob;
-                    proposals.push_back(obj);
-                }
-            } // class loop
+            if(!twelve_classes_){
+                ROS_INFO("NORMOL CLASSES");
+                for (int class_idx = 0; class_idx < class_num_; class_idx++) {
+                    float box_cls_score = net_pred[basic_pos + 9 + class_idx];
+                    float box_prob = box_objectness * box_cls_score;
+                    if (box_prob > cof_threshold_) {
+                        Target obj;
+                        obj.points.push_back(x1);
+                        obj.points.push_back(y1);
+                        obj.points.push_back(x2);
+                        obj.points.push_back(y2);
+                        obj.points.push_back(x3);
+                        obj.points.push_back(y3);
+                        obj.points.push_back(x4);
+                        obj.points.push_back(y4);
+                        obj.label = class_idx;
+                        obj.prob = box_prob;
+                        proposals.push_back(obj);
+                    }
+                } // class loop
+            } else{
+                int box_color = argmax(net_pred + basic_pos + 9, 4);
+                int box_class = argmax(net_pred + basic_pos + 9 + 4, 8);
+                    //float box_cls_score = net_pred[basic_pos + 9 + class_idx];
+                    //float box_color_type_score = net_pred[basic_pos + 9 + class_idx];
+                    float box_prob = box_objectness ;
+                    if (box_color == target_type_ || box_color == target_type_ + 2 || box_color < target_type_ * 2){
+                        if (box_prob > cof_threshold_) {
+                            Target obj;
+                            obj.points.push_back(x1);
+                            obj.points.push_back(y1);
+                            obj.points.push_back(x2);
+                            obj.points.push_back(y2);
+                            obj.points.push_back(x3);
+                            obj.points.push_back(y3);
+                            obj.points.push_back(x4);
+                            obj.points.push_back(y4);
+                            obj.label = box_class;
+                            obj.prob = box_prob;
+                            proposals.push_back(obj);
+                        } // class loop
+                    }
+            }
         } // point anchor loop
+    }
+
+    int OpvnProcessor::argmax(const float *ptr, int len)
+    {
+        int max_arg = 0;
+        for (int i = 1; i < len; i++) {
+            if (ptr[i] > ptr[max_arg]) max_arg = i;
+        }
+        return max_arg;
     }
 
     void OpvnProcessor::nmsSortedBoxes(std::vector<Target> &faceobjects, std::vector<int> &picked, double nms_threshold)  {
