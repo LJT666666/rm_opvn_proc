@@ -109,8 +109,9 @@ private:
             memcpy(buffer+2, &target_array_.detections[0].pose.orientation.y, sizeof(int32_t) * 2);
             memcpy(buffer+4, &target_array_.detections[0].pose.orientation.z, sizeof(int32_t) * 2);
             memcpy(buffer+6, &target_array_.detections[0].pose.orientation.w, sizeof(int32_t) * 2);
-            target_pub_.publish(target_array_);
+
         }
+        target_pub_.publish(target_array_);
 //        debug_pub_.publish(cv_bridge::CvImage(info->header, "bgr8", image_raw_).toImageMsg());
         debug_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), "bgr8", image_raw_).toImageMsg());
     }

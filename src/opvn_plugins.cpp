@@ -138,6 +138,7 @@ namespace opvn_plugins {
         for (int i = 0; i < count; i++) {
             rm_msgs::TargetDetection one_target;
             one_target.confidence = proposals[i].prob;
+            ROS_INFO("%f", proposals[i].prob);
             one_target.id = proposals[i].label;
             int32_t temp[8];
 
@@ -152,6 +153,14 @@ namespace opvn_plugins {
             memcpy(&one_target.pose.orientation.w, &temp[6], sizeof(int32_t) * 2);
             target_array_.detections.emplace_back(one_target);
         }
+//        if (count == 0){
+//            rm_msgs::TargetDetection one_target;
+//            one_target.id = 0;
+//            one_target.pose.position.x = 0;
+//            one_target.pose.position.y = 0;
+//            one_target.pose.position.z = 0;
+//            target_array_.detections.emplace_back(one_target);
+//        }
     }
 
     void OpvnProcessor::draw() {
@@ -278,13 +287,22 @@ namespace opvn_plugins {
                     }
                 } // class loop
             } else{
-                int box_color = argmax(net_pred + basic_pos + 9, 4);
-                int box_class = argmax(net_pred + basic_pos + 9 + 4, 8);
-                    //float box_cls_score = net_pred[basic_pos + 9 + class_idx];
-                    //float box_color_type_score = net_pred[basic_pos + 9 + class_idx];
-                    float box_prob = box_objectness ;
-                    if (box_color == target_type_ || box_color == target_type_ + 2 || box_color < target_type_ * 2){
+                    /***
+                    box_color
+                    0 : small-blue armor
+                    1 : small-red armor
+                    2 : big-blue armor
+                    3: big-red armor
+                    ***/
+                    int box_color = argmax(net_pred + basic_pos + 9, 4);
+                    int box_class = argmax(net_pred + basic_pos + 9 + 4, 8);
+                    float box_color_score = net_pred[basic_pos + 9 + box_color];
+                    float box_cls_score = net_pred[basic_pos + 9 + 4 + box_class];
+
+                    float box_prob = box_objectness * box_color_score * box_cls_score;
+                    if ((target_type_ == 0 && (box_color == 0 || box_color == 2)) ||(target_type_ == 1 && (box_color == 1 || box_color == 3)) || target_type_ == 2){
                         if (box_prob > cof_threshold_) {
+                            ROS_INFO("%f", box_prob);
                             Target obj;
                             obj.points.push_back(x1);
                             obj.points.push_back(y1);
