@@ -110,6 +110,10 @@ private:
             memcpy(buffer+4, &target_array_.detections[0].pose.orientation.z, sizeof(int32_t) * 2);
             memcpy(buffer+6, &target_array_.detections[0].pose.orientation.w, sizeof(int32_t) * 2);
 
+        } else{
+            rm_msgs::TargetDetection one_target;
+            one_target.id = 0;
+            target_array_.detections.emplace_back(one_target);
         }
         target_pub_.publish(target_array_);
 //        debug_pub_.publish(cv_bridge::CvImage(info->header, "bgr8", image_raw_).toImageMsg());

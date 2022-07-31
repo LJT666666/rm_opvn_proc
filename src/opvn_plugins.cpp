@@ -153,14 +153,7 @@ namespace opvn_plugins {
             memcpy(&one_target.pose.orientation.w, &temp[6], sizeof(int32_t) * 2);
             target_array_.detections.emplace_back(one_target);
         }
-//        if (count == 0){
-//            rm_msgs::TargetDetection one_target;
-//            one_target.id = 0;
-//            one_target.pose.position.x = 0;
-//            one_target.pose.position.y = 0;
-//            one_target.pose.position.z = 0;
-//            target_array_.detections.emplace_back(one_target);
-//        }
+
     }
 
     void OpvnProcessor::draw() {
