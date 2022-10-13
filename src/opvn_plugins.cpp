@@ -70,7 +70,7 @@ namespace opvn_plugins {
 
         it_ = make_shared<image_transport::ImageTransport>(nh_);
         debug_pub_ = it_->advertise("debug_image", 1);
-        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
+        cam_sub_ = it_->subscribeCamera("/hk_camera/image_raw", 1, &OpvnProcessor::callback, this);
 //        bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         target_pub_ = nh.advertise<decltype(target_array_)>("/processor/result_msg", 1);
     }
@@ -95,6 +95,8 @@ namespace opvn_plugins {
     void OpvnProcessor::findArmor() {
         InferRequest::Ptr infer = executable_network_.CreateInferRequestPtr();
 //        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
+        std::string img_path = "/home/ljt666666/catkin_ws/src/livox_camera_lidar_calibration/data/images/0.bmp";
+        imwrite(img_path, image_raw_);
         if(rotate_)
             cv::rotate(image_raw_, image_raw_, cv::ROTATE_180);
         square_image_ = staticResize(image_raw_);
