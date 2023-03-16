@@ -70,7 +70,7 @@ namespace opvn_plugins {
 
         it_ = make_shared<image_transport::ImageTransport>(nh_);
         debug_pub_ = it_->advertise("debug_image", 1);
-        cam_sub_ = it_->subscribeCamera("/hk_camera/image_raw", 1, &OpvnProcessor::callback, this);
+        cam_sub_ = it_->subscribeCamera("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
 //        bag_sub_ = it_->subscribe("/galaxy_camera/image_raw", 1, &OpvnProcessor::callback, this);
         target_pub_ = nh.advertise<decltype(target_array_)>("/processor/result_msg", 1);
     }
@@ -95,8 +95,8 @@ namespace opvn_plugins {
     void OpvnProcessor::findArmor() {
         InferRequest::Ptr infer = executable_network_.CreateInferRequestPtr();
 //        image_raw_ = imread("/home/ljt666666/catkin_ws/src/rm_visplugin/rm_opvn_proc/images/2337.jpg");
-        std::string img_path = "/home/ljt666666/catkin_ws/src/livox_camera_lidar_calibration/data/images/0.bmp";
-        imwrite(img_path, image_raw_);
+//        std::string img_path = "/home/ljt666666/catkin_ws/src/livox_camera_lidar_calibration/data/images/0.bmp";
+//        imwrite(img_path, image_raw_);
         if(rotate_)
             cv::rotate(image_raw_, image_raw_, cv::ROTATE_180);
         square_image_ = staticResize(image_raw_);
@@ -140,7 +140,7 @@ namespace opvn_plugins {
         for (int i = 0; i < count; i++) {
             rm_msgs::TargetDetection one_target;
             one_target.confidence = proposals[i].prob;
-            ROS_INFO("%f", proposals[i].prob);
+//            ROS_INFO("%f", proposals[i].prob);
             one_target.id = proposals[i].label;
             int32_t temp[8];
 
@@ -262,7 +262,7 @@ namespace opvn_plugins {
             float box_objectness = net_pred[basic_pos + 8];
 
             if(!twelve_classes_){
-                ROS_INFO("NORMOL CLASSES");
+//                ROS_INFO("NORMOL CLASSES");
                 for (int class_idx = 0; class_idx < class_num_; class_idx++) {
                     float box_cls_score = net_pred[basic_pos + 9 + class_idx];
                     float box_prob = box_objectness * box_cls_score;
@@ -297,7 +297,7 @@ namespace opvn_plugins {
                     float box_prob = box_objectness * box_color_score * box_cls_score;
                     if ((target_type_ == 0 && (box_color == 0 || box_color == 2)) ||(target_type_ == 1 && (box_color == 1 || box_color == 3)) || target_type_ == 2){
                         if (box_prob > cof_threshold_) {
-                            ROS_INFO("%f", box_prob);
+//                            ROS_INFO("%f", box_prob);
                             Target obj;
                             obj.points.push_back(x1);
                             obj.points.push_back(y1);

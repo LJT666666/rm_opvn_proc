@@ -96,25 +96,17 @@ private:
         draw();
         auto predict_end = std::chrono::high_resolution_clock::now();
         std::chrono::duration<double> infer_time = predict_end - predict_start;
-        ROS_INFO("infer_time: %f", infer_time.count());
+//        ROS_INFO("infer_time: %f", infer_time.count());
         for (auto& target : target_array_.detections)
         {
             target.pose.position.x = info->roi.x_offset;
             target.pose.position.y = info->roi.y_offset;
         }
-        if (!target_array_.detections.empty()) {
-//            ROS_INFO("find targets!");
-            int32_t buffer[8];
-            memcpy(buffer, &target_array_.detections[0].pose.orientation.x, sizeof(int32_t) * 2);
-            memcpy(buffer+2, &target_array_.detections[0].pose.orientation.y, sizeof(int32_t) * 2);
-            memcpy(buffer+4, &target_array_.detections[0].pose.orientation.z, sizeof(int32_t) * 2);
-            memcpy(buffer+6, &target_array_.detections[0].pose.orientation.w, sizeof(int32_t) * 2);
-
-        } else{
-            rm_msgs::TargetDetection one_target;
-            one_target.id = 0;
-            target_array_.detections.emplace_back(one_target);
-        }
+//        if (target_array_.detections.empty()) {
+//            rm_msgs::TargetDetection one_target;
+//            one_target.id = 0;
+//            target_array_.detections.emplace_back(one_target);
+//        }
         target_pub_.publish(target_array_);
 //        debug_pub_.publish(cv_bridge::CvImage(info->header, "bgr8", image_raw_).toImageMsg());
         debug_pub_.publish(cv_bridge::CvImage(std_msgs::Header(), "bgr8", image_raw_).toImageMsg());
